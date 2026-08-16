@@ -1,0 +1,62 @@
+[
+  {
+    "start": "2024-09-24",
+    "end": "2024-11-25",
+    "source": "confirmed"
+  },
+  {
+    "start": "2024-11-25",
+    "end": "2025-01-27",
+    "source": "confirmed"
+  },
+  {
+    "start": "2025-01-27",
+    "end": "2025-03-21",
+    "source": "confirmed"
+  },
+  {
+    "start": "2025-03-21",
+    "end": "2025-05-20",
+    "source": "confirmed"
+  },
+  {
+    "start": "2025-05-20",
+    "end": "2025-07-22",
+    "source": "confirmed"
+  },
+  {
+    "start": "2025-07-22",
+    "end": "2025-09-22",
+    "source": "confirmed"
+  },
+  {
+    "start": "2025-09-22",
+    "end": "2025-11-25",
+    "source": "confirmed"
+  },
+  {
+    "start": "2025-11-25",
+    "end": "2026-01-23",
+    "source": "confirmed"
+  },
+  {
+    "start": "2026-01-23",
+    "end": "2026-03-20",
+    "source": "confirmed"
+  },
+  {
+    "start": "2026-03-20",
+    "end": "2026-05-22",
+    "source": "confirmed"
+  },
+  {
+    "start": "2026-05-22",
+    "end": "2026-07-21",
+    "source": "confirmed"
+  },
+  {
+    "start": "2026-07-21",
+    "end": "2026-09-20",
+    "source": "estimated"
+  }
+]
