@@ -3,6 +3,7 @@ import os
 
 import pandas as pd
 import plotly.express as px
+import requests
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -42,25 +43,60 @@ DEV_AUTOLOGIN = os.environ.get("EAC_DEV_AUTOLOGIN") == "1"
 # data to everyone. Likewise every @st.cache_data function below takes user_key,
 # which does nothing but scope the cache entry to one account - without it the
 # argument-less/sp-keyed caches collide across users.
-def _authenticate(email: str, password: str) -> bool:
+def _log_login_failure(label: str, exc: Exception) -> None:
+    """Record why a login failed, without recording who tried.
+
+    The email is deliberately left out: on a shared deployment the logs belong
+    to whoever runs the app, and a visitor's address is not theirs to collect.
+    Community Cloud buffers stdout, hence the explicit flush.
+    """
+    print(f"[login] failed: {label}: {exc}", flush=True)
+
+
+def _authenticate(email: str, password: str) -> str | None:
     """Exchange credentials for a JWT and keep only the JWT.
 
     The password is dropped as soon as it has been spent (see
     EacClient.forget_password), so nothing but a ~24h token lives in the
     session, and nothing at all is written to disk. When that token expires the
     session ends and the visitor logs in again.
+
+    Returns None on success, or the message to show the visitor. Failures are
+    told apart rather than collapsed into "wrong password", which was actively
+    misleading once this ran anywhere but a laptop: a deployed copy reaches EAC
+    from a datacentre in another country, so being blocked or unable to connect
+    is at least as likely as a typo. Deployments also force
+    showErrorDetails=false, so the log line above is the only place the
+    underlying error survives.
     """
     client = EacClient(email, password)
     try:
         # Assigned, not left bare: Streamlit's "magic" rewrites a bare expression
         # into st.write() and would print the account email onto the page.
         _ = client.user_id  # forces the login round-trip
-    except Exception:
-        return False
+    except requests.HTTPError as exc:
+        response = exc.response
+        status = response.status_code if response is not None else None
+        # The body matters more than the code here. Measured against the live
+        # portal: bad credentials come back 403, not 401, with a JSON body whose
+        # "path" is /api/portal/login. A network-level block would also be 403 -
+        # so the code alone can't tell a typo from a firewall, and the body is
+        # logged to settle it.
+        body = (response.text[:300] if response is not None else "")
+        _log_login_failure(f"HTTP {status}", RuntimeError(body or str(exc)))
+        if status in (400, 401, 403):
+            return "Login failed — check your email and password."
+        return f"EAC returned an unexpected error (HTTP {status})."
+    except requests.RequestException as exc:
+        _log_login_failure(type(exc).__name__, exc)
+        return "Could not reach the EAC portal from this server."
+    except Exception as exc:
+        _log_login_failure(type(exc).__name__, exc)
+        return f"Unexpected error while signing in ({type(exc).__name__})."
     client.forget_password()
     st.session_state.client = client
     st.session_state.pop("session_ended", None)
-    return True
+    return None
 
 
 def get_client() -> EacClient:
@@ -78,7 +114,7 @@ def get_client() -> EacClient:
 
     if DEV_AUTOLOGIN and not ended:
         email, password = os.environ.get("EAC_EMAIL"), os.environ.get("EAC_PASSWORD")
-        if email and password and _authenticate(email, password):
+        if email and password and _authenticate(email, password) is None:
             return st.session_state.client
         st.error("EAC_DEV_AUTOLOGIN is set but EAC_EMAIL / EAC_PASSWORD did not work.")
         st.stop()
@@ -93,17 +129,35 @@ def get_client() -> EacClient:
             st.warning("Your session expired. Please log in again.")
         elif ended == "logout":
             st.success("Signed out.")
+        # Neither field is given a key: a keyed widget keeps its value in
+        # st.session_state, and the password has no business living there. That
+        # rules out literally disabling the button while the request is in
+        # flight - doing so needs the submit handled on a later run, which needs
+        # the credentials to survive a rerun. Marking the run busy and rendering
+        # a disabled button in the same pass does not work either: a disabled
+        # submit button reports submitted=False, so the login never fires and
+        # the form sticks on "Signing in..." forever. A spinner plus the guard
+        # below gives the same protection without holding the password.
         with st.form("login"):
             email = st.text_input("Email")
             password = st.text_input("Password", type="password")
             submitted = st.form_submit_button("Log in", type="primary", width="stretch")
-        if submitted:
+        if submitted and not st.session_state.get("logging_in"):
             if not email or not password:
                 st.error("Enter both your email and password.")
-            elif _authenticate(email, password):
-                st.rerun()
             else:
-                st.error("Login failed — check your email and password.")
+                st.session_state.logging_in = True
+                try:
+                    with st.spinner("Signing in…"):
+                        problem = _authenticate(email, password)
+                finally:
+                    # Cleared even if the round-trip raises, or a stray failure
+                    # would lock the form for the rest of the session.
+                    st.session_state.logging_in = False
+                if problem:
+                    st.error(problem)
+                else:
+                    st.rerun()
         st.caption(
             "Use your EAC portal account. Credentials go straight to "
             "meterreading-dso.eac.com.cy — nothing is stored here, and you are "
